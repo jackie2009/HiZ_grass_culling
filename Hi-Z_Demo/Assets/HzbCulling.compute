@@ -1,0 +1,62 @@
+﻿// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel CSCulling
+
+// Create a RenderTexture with enableRandomWrite flag and set it
+// with cs.SetTexture
+
+StructuredBuffer<float3> posAllBuffer;
+RWStructuredBuffer<float3> posVisibleBuffer;
+RWStructuredBuffer<int> bufferWithArgs;
+float3 cmrPos;
+float3 cmrDir;
+float cmrHalfFov;
+float4x4 matrix_VP;
+Texture2D HZB_Depth;
+float useHzb;
+  
+
+[numthreads(16,16,1)]
+void CSCulling(uint3 id : SV_DispatchThreadID)
+{
+	uint index = id.y * 400+ id.x;
+	float3 itemPos = posAllBuffer[index];
+	float3 itemDir = normalize(itemPos - cmrPos);
+	float rot = dot(cmrDir, itemDir);
+
+ 
+ 		float4 clipPos = mul(matrix_VP, float4(itemPos-cmrDir *0.2, 1));
+ 
+
+		if (max(abs(clipPos.x), abs(clipPos.y)) > clipPos.w+0.7)return;
+ 		if (useHzb > 0.5) {
+			
+			clipPos.xyz /= clipPos.w;
+			clipPos.xy = clipPos.xy * 0.5 + 0.5;
+
+		/*	 float4 clip_left_Pos = mul(matrix_VP, float4(itemPos - half3(0.5, 0.5, 0.5),1));
+			clip_left_Pos.xyz /= clip_left_Pos.w;
+			clip_left_Pos.xy = clip_left_Pos.xy * 0.5 + 0.5;
+
+			float scWid =max(abs(clipPos.x - clip_left_Pos.x), abs(clipPos.y - clip_left_Pos.y)) * 1024;
+			  clip_left_Pos = mul(matrix_VP, float4(itemPos + half3(0.5, 0.5, 0.5), 1));
+			clip_left_Pos.xyz /= clip_left_Pos.w;
+			clip_left_Pos.xy = clip_left_Pos.xy * 0.5 + 0.5;
+
+			  scWid =max(scWid, max(abs(clipPos.x - clip_left_Pos.x), abs(clipPos.y - clip_left_Pos.y)) * 1024); */
+
+		 	float scWid = 0.2 / (tan(cmrHalfFov * 3.1415926 / 180)* clipPos.w) * 1024;
+
+			uint mips = ( uint)clamp(log2(scWid),0,7);
+			//if (scWid < 20&&index%max(2,((uint)scWid/1.5))==0)return;
+			uint texScale = 1 << mips;
+			uint2 uv = uint2( clipPos.xy * (1024 / texScale));
+		 
+			float minD =min( min(HZB_Depth.mips[mips][uv.xy + uint2(0, 0)].r, HZB_Depth.mips[mips][uv.xy + uint2(0, 1)].r), min(HZB_Depth.mips[mips][uv.xy + uint2(1, 0)].r, HZB_Depth.mips[mips][uv.xy + uint2(1, 1)].r));
+			if (minD > clipPos.z)return;
+		}
+	 
+ 
+	int currentIndex;
+	InterlockedAdd(bufferWithArgs[1], 1, currentIndex);
+	posVisibleBuffer[currentIndex] = itemPos;
+}
